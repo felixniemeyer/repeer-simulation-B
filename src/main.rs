@@ -102,26 +102,26 @@ impl Strategy for ReputationTracker {
     fn get_type(&self) -> &str { "reputation tracker" }
 }
 
-// struct Evil {}
-// impl Strategy for Evil {
-//     fn accept_or_reject_request(&mut self, _borrower: usize) -> BorrowerAction {
-//         REJECT
-//     }
-// 
-//     fn notify_about_rejection(&mut self, _lender: usize) {
-//     }
-// 
-//     fn coop_or_defect(&mut self, _lender: usize) -> LenderAction {
-//         DEFECT
-//     }
-// 
-//     fn notify_coop_or_defect(&mut self, _borrower: usize, _coop: BorrowerAction) {
-//     }
-// 
-//     fn get_type(&self) -> &str {
-//         "pure evil"
-//     }
-// }
+struct Evil {}
+impl Strategy for Evil {
+    fn accept_or_reject_request(&mut self, _borrower: usize) -> BorrowerAction {
+        REJECT
+    }
+
+    fn notify_about_rejection(&mut self, _lender: usize) {
+    }
+
+    fn coop_or_defect(&mut self, _lender: usize) -> LenderAction {
+        DEFECT
+    }
+
+    fn notify_coop_or_defect(&mut self, _borrower: usize, _coop: BorrowerAction) {
+    }
+
+    fn get_type(&self) -> &str {
+        "pure evil"
+    }
+}
  
 // struct AlwaysAccept {}
 // impl ResponseStrategy for AlwaysAccept{
@@ -135,17 +135,18 @@ impl Strategy for ReputationTracker {
 //     fn get_type(&self) -> &str { "rejecter" }
 // }
 // 
-// struct Alternate {
+
+// struct Alternating {
 //     last_response: BorrowerAction
 // }
-// impl ResponseStrategy for Alternate{
+// impl ResponseStrategy for Alternating {
 //     fn evaluate_request(&mut self, _borrower: usize) -> BorrowerAction { 
 //         self.last_response = !self.last_response;
 //         self.last_response
 //     }
 //     fn get_type(&self) -> &str { "rejecter" }
 // }
-// 
+
 // struct Mirror {
 //     last_action: HashMap<usize, f64>, 
 //     optimistic: bool // trusts initially? 
@@ -155,11 +156,10 @@ impl Strategy for ReputationTracker {
 //     fn accept_or_reject_request(&mut self, 
 // }
 
-
 struct Agent {
     pub strategy: Box<dyn Strategy>, 
     energy: f64, 
-    id: usize 
+    id: usize
 }
 
 impl fmt::Debug for Agent {
@@ -172,13 +172,15 @@ type AgentDefinition = (fn() -> Box<dyn Strategy>, usize);
 
 fn main() {
     fn reptrack() -> Box<dyn Strategy> { Box::new(ReputationTracker::new(true, true)) }
+    fn evil() -> Box<dyn Strategy> { Box::new(Evil{}) }
     let mut agents = gen_agents(vec![
-        (reptrack, 32)
+        (reptrack, 32), 
+        (evil, 16), 
     ]);
 
     println!("{:?}", agents);
 
-    simulate(&mut agents);
+    simulate(&mut agents, 20);
 }
 
 fn gen_agents(agent_definitions: Vec<AgentDefinition>) -> Vec<Agent> {
@@ -201,8 +203,8 @@ fn gen_agents(agent_definitions: Vec<AgentDefinition>) -> Vec<Agent> {
     agents
 }
 
-fn simulate(agents: &mut Vec<Agent>) {
-    for round in 0..4 {
+fn simulate(agents: &mut Vec<Agent>, rounds: i32) {
+    for round in 0..rounds {
         println!("Round {}.", round); 
         report(agents); 
         for i in 1..agents.len() {
@@ -234,13 +236,16 @@ fn report(agents: &Vec<Agent>) {
         };
     }
 
-    for strategy in count.keys() {
-        let c = count.get(strategy).unwrap();
+    let mut keys = count.keys().collect::<Vec<&String>>(); 
+    keys.sort(); 
+
+    for strategy in keys.iter() {
+        let c = count.get(*strategy).unwrap();
         println!("{}:", strategy); 
-        println!("count: {}", c); 
-        match sum.get(strategy) {
+        println!(" - count: {}", c); 
+        match sum.get(*strategy) {
             Some(s) => {
-                println!("mean energy: {}", s / (*c as f64))
+                println!(" - mean energy: {}", s / (*c as f64))
             }, 
             None => {}
         };
