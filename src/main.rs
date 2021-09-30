@@ -1,3 +1,5 @@
+use rand::rngs::ThreadRng;
+use rand::Rng; 
 use core::fmt;
 use std::collections::HashMap;
 
@@ -9,9 +11,9 @@ struct GameParams {
 }
 
 const GP: GameParams = GameParams {
-    borrower_defect_payout: 3., // steals the device
-    borrower_coop_payout: 2., // uses the device
-    lender_defect_payout: -3., // loses the device
+    borrower_defect_payout: 6., // steals the device
+    borrower_coop_payout: 3., // uses the device
+    lender_defect_payout: -7., // loses the device
     lender_coop_payout: -1., // lending effort + device wear
 };
 
@@ -21,32 +23,27 @@ const REJECT: BorrowerAction = false;
 
 type LenderAction = bool; 
 const COOP: BorrowerAction = true; 
-const DEFECT: BorrowerAction = false; 
+// const DEFECT: BorrowerAction = false; 
 
-trait Strategy {
+trait Strategy : ToString {
     fn accept_or_reject_request(&mut self, borrower: usize) -> BorrowerAction; 
     fn notify_about_rejection(&mut self, lender: usize); 
     fn coop_or_defect(&mut self, lender: usize) -> LenderAction; 
     fn notify_coop_or_defect(&mut self, borrower: usize, coop: BorrowerAction); 
-    fn get_type(&self) -> &str; 
+    fn get_type(&self) -> String;
+    fn clone(&self) -> Box<dyn Strategy>; 
 }
 
 struct ReputationTracker {
     reputations: HashMap<usize, f64>, 
-    lower_threshold: f64, 
     optimistic: bool, 
-    revenging: bool, 
-    defect_penalty: f64, 
 }
 
 impl ReputationTracker {
-    fn new(optimistic: bool, revenging: bool) -> ReputationTracker {
+    fn new(optimistic: bool) -> ReputationTracker {
         ReputationTracker {
             reputations: HashMap::<usize, f64>::new(), 
-            lower_threshold: 0.0, 
             optimistic, 
-            revenging, 
-            defect_penalty: 3.0
         }
     }
 }
@@ -55,7 +52,7 @@ impl Strategy for ReputationTracker {
     fn accept_or_reject_request(&mut self, borrower: usize) -> BorrowerAction {
         match self.reputations.get_mut(&borrower) {
             Some(r) => {
-                if *r >= self.lower_threshold { 
+                if *r > 0.0 || (*r == 0.0 && self.optimistic) { 
                     ACCEPT
                 } else { 
                     REJECT 
@@ -76,11 +73,7 @@ impl Strategy for ReputationTracker {
         match self.reputations.get_mut(&lender) {
             Some(r) => {
                 *r += GP.borrower_coop_payout; 
-                if self.revenging == false || *r > 0.0 {
-                    return COOP; 
-                } else {
-                    return DEFECT; 
-                }
+                return COOP; 
             }, 
             None => {
                 self.reputations.insert(lender, GP.borrower_coop_payout); 
@@ -89,7 +82,11 @@ impl Strategy for ReputationTracker {
         }
     }
     fn notify_coop_or_defect(&mut self, borrower: usize, coop: BorrowerAction) {
-        let penalty = if coop { 0. } else { GP.lender_defect_payout * self.defect_penalty }; 
+        let penalty = if coop { 
+            GP.lender_coop_payout 
+        } else { 
+            GP.lender_defect_payout 
+        }; 
         match self.reputations.get_mut(&borrower) {
             Some(r) => {
                 *r += penalty; 
@@ -99,42 +96,80 @@ impl Strategy for ReputationTracker {
             }
         }
     }
-    fn get_type(&self) -> &str { "reputation tracker" }
+    fn get_type(&self) -> String { 
+        "reputation tracker".into() 
+    }
+    fn clone(&self) -> Box<dyn Strategy> {
+        Box::new( Self {
+            reputations: self.reputations.clone(), 
+            optimistic: self.optimistic
+        })
+    }
 }
 
-struct Evil {}
-impl Strategy for Evil {
+impl ToString for ReputationTracker {
+    fn to_string(&self) -> String {
+        format!("Strategy: {}; optimistic: {}", self.get_type(), self.optimistic)   
+    }
+}
+
+struct RandomStrategy {
+    rng: ThreadRng, 
+    accept_prob: f32, 
+    coop_prob: f32, 
+    type_name: String
+}
+
+impl RandomStrategy {
+    fn new(accept_prob: f32, coop_prob: f32, type_name: String) -> Self {
+        Self {
+            rng: rand::thread_rng(),
+            accept_prob, 
+            coop_prob, 
+            type_name
+        }
+    }
+}
+
+impl Strategy for RandomStrategy {
     fn accept_or_reject_request(&mut self, _borrower: usize) -> BorrowerAction {
-        REJECT
+        self.rng.gen::<f32>() <= self.accept_prob
     }
 
     fn notify_about_rejection(&mut self, _lender: usize) {
     }
 
     fn coop_or_defect(&mut self, _lender: usize) -> LenderAction {
-        DEFECT
+        self.rng.gen::<f32>() <= self.coop_prob
     }
 
     fn notify_coop_or_defect(&mut self, _borrower: usize, _coop: BorrowerAction) {
     }
 
-    fn get_type(&self) -> &str {
-        "pure evil"
+    fn get_type(&self) -> String {
+        self.type_name.clone()
+    }
+    fn clone(&self) -> Box<dyn Strategy> {
+        Box::new(
+            Self::new(
+                self.accept_prob, 
+                self.coop_prob, 
+                self.type_name.clone()
+            )
+        ) 
     }
 }
- 
-// struct AlwaysAccept {}
-// impl ResponseStrategy for AlwaysAccept{
-//     fn evaluate_request(&mut self, _borrower: usize) -> BorrowerAction { ACCEPT }
-//     fn get_type(&self) -> &str { "accepter" }
-// }
-// 
-// struct AlwaysReject {}
-// impl ResponseStrategy for AlwaysReject {
-//     fn evaluate_request(&mut self, _borrower: usize) -> BorrowerAction { REJECT }
-//     fn get_type(&self) -> &str { "rejecter" }
-// }
-// 
+
+impl ToString for RandomStrategy {
+    fn to_string(&self) -> String {
+        format!(
+            "Strategy: {}; accept_prop: {}, coop_prob: {}", 
+            self.type_name, 
+            self.accept_prob, 
+            self.coop_prob
+        )
+    }
+}
 
 // struct Alternating {
 //     last_response: BorrowerAction
@@ -171,16 +206,22 @@ impl fmt::Debug for Agent {
 type AgentDefinition = (fn() -> Box<dyn Strategy>, usize);
 
 fn main() {
-    fn reptrack() -> Box<dyn Strategy> { Box::new(ReputationTracker::new(true, true)) }
-    fn evil() -> Box<dyn Strategy> { Box::new(Evil{}) }
+    fn reptrack() -> Box<dyn Strategy> { Box::new(ReputationTracker::new(true)) }
+    fn never_accept_always_defect() -> Box<dyn Strategy> { 
+        Box::new(RandomStrategy::new(0.0, 0.0, "never accept, always defect".into()))
+    }
+    fn random() -> Box<dyn Strategy> { 
+        Box::new(RandomStrategy::new(0.5, 0.5, "random 50/50".into())) 
+    }
     let mut agents = gen_agents(vec![
-        (reptrack, 32), 
-        (evil, 16), 
+        (reptrack, 64), 
+        (never_accept_always_defect, 32), 
+        (random, 32), 
     ]);
 
     println!("{:?}", agents);
 
-    simulate(&mut agents, 20);
+    simulate(&mut agents, 30);
 }
 
 fn gen_agents(agent_definitions: Vec<AgentDefinition>) -> Vec<Agent> {
@@ -245,7 +286,7 @@ fn report(agents: &Vec<Agent>) {
         println!(" - count: {}", c); 
         match sum.get(*strategy) {
             Some(s) => {
-                println!(" - mean energy: {}", s / (*c as f64))
+                println!(" - mean energy: {:.2}", s / (*c as f64))
             }, 
             None => {}
         };
